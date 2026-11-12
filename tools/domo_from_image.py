@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Convert a photo of Domo-kun into a palettized sprite header for the PSP game.
+
+usage: domo_from_image.py <image> <out.h> [height_px] [preview.png]
+
+- removes the flat background by flood-filling from the image border
+- crops, downscales, quantizes to a small palette, adds a dark outline
+- marks the red mouth colours so the game can make the mouth glow
+"""
+import sys
+from collections import deque
+from PIL import Image, ImageEnhance, ImageFilter
+
+src, out_h = sys.argv[1], sys.argv[2]
+target_h = int(sys.argv[3]) if len(sys.argv) > 3 else 58
+preview = sys.argv[4] if len(sys.argv) > 4 else None
+NCOLORS = 24
+
+im = Image.open(src).convert('RGB')
+w, h = im.size
+px = im.load()
+
+# --- background removal: flood fill from the border, colour-distance tolerance ---
+def dist(a, b): return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+bg = [[False] * w for _ in range(h)]
+q = deque()
+for x in range(w):
+    q.append((x, 0)); q.append((x, h - 1))
+for y in range(h):
+    q.append((0, y)); q.append((w - 1, y))
+ref = px[0, 0]
+while q:
+    x, y = q.popleft()
+    if not (0 <= x < w and 0 <= y < h) or bg[y][x]: continue
+    if dist(px[x, y], ref) > 70: continue
+    bg[y][x] = True
+    q.extend(((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)))
+
+alpha = Image.new('L', (w, h))
+ap = alpha.load()
+for y in range(h):
+    for x in range(w):
+        ap[x, y] = 0 if bg[y][x] else 255
+# erode a few px: the fuzzy edge pixels are blended with the background colour (pale halo)
+alpha = alpha.filter(ImageFilter.MinFilter(7))
+rgba = im.copy(); rgba.putalpha(alpha)
+rgba = rgba.crop(alpha.getbbox())
+
+# --- downscale ---
+cw, ch = rgba.size
+tw = max(1, round(cw * target_h / ch))
+small = rgba.resize((tw, target_h), Image.LANCZOS)
+# punch up contrast/saturation a bit: fuzzy plush photos go muddy when tiny
+rgb = small.convert('RGB')
+rgb = ImageEnhance.Contrast(rgb).enhance(1.25)
+rgb = ImageEnhance.Color(rgb).enhance(1.2)
+a = small.getchannel('A').point(lambda v: 255 if v >= 128 else 0)
+
+# --- quantize opaque pixels to a small palette ---
+q_img = rgb.quantize(colors=NCOLORS, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+pal = q_img.getpalette()[:NCOLORS * 3]
+colors = [tuple(pal[i * 3:i * 3 + 3]) for i in range(NCOLORS)]
+# teeth: snap light colours to crisp white so they read at small size
+colors = [(250, 250, 245) if sum(c) / 3 > 165 else c for c in colors]
+qi = q_img.load(); al = a.load()
+
+# index 0 = transparent, 1 = outline, 2.. = image colours
+OUTLINE = (0x24, 0x10, 0x06)
+palette = [(0, 0, 0), OUTLINE] + colors
+grid = [[0] * tw for _ in range(target_h)]
+for y in range(target_h):
+    for x in range(tw):
+        if al[x, y]: grid[y][x] = 2 + qi[x, y]
+
+# --- 1px outline around the silhouette (drawn outside it) ---
+W2, H2 = tw + 2, target_h + 2
+g2 = [[0] * W2 for _ in range(H2)]
+for y in range(target_h):
+    for x in range(tw):
+        g2[y + 1][x + 1] = grid[y][x]
+for y in range(H2):
+    for x in range(W2):
+        if g2[y][x]: continue
+        if any(0 <= y + dy < H2 and 0 <= x + dx < W2 and g2[y + dy][x + dx] >= 2
+               for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+            g2[y][x] = 1
+
+# --- tag mouth colours (strongly red) and find the mouth centre ---
+def is_red(c): r, g, b = c; return r > 150 and r > g * 2.5 and r > b * 2.5
+mouth_idx = [i for i, c in enumerate(palette) if i >= 2 and is_red(c)]
+mx = my = n = 0
+for y in range(H2):
+    for x in range(W2):
+        if g2[y][x] in mouth_idx: mx += x; my += y; n += 1
+mx, my = (mx // n, my // n) if n else (W2 // 3, H2 // 2)
+
+# white only belongs to the teeth: outside the mouth box, replace with the lightest fur colour
+white_idx = [i for i, c in enumerate(palette) if c == (250, 250, 245)]
+reds = [(x, y) for y in range(H2) for x in range(W2) if g2[y][x] in mouth_idx]
+if reds and white_idx:
+    x0 = min(x for x, _ in reds) - 3; x1 = max(x for x, _ in reds) + 3
+    y0 = min(y for _, y in reds) - 3; y1 = max(y for _, y in reds) + 3
+    fur = [i for i, c in enumerate(palette) if i >= 2 and i not in mouth_idx and i not in white_idx]
+    light = max(fur, key=lambda i: sum(palette[i]))
+    for y in range(H2):
+        for x in range(W2):
+            if g2[y][x] in white_idx and not (x0 <= x <= x1 and y0 <= y <= y1):
+                g2[y][x] = light
+
+# --- eyes: darkest colours above the mouth, split into left/right halves ---
+dark_idx = [i for i, c in enumerate(palette) if i >= 2 and sum(c) < 110]
+eyes = []
+for half in (range(0, W2 // 2), range(W2 // 2, W2)):
+    pts = [(x, y) for y in range(2, max(3, my - 4)) for x in half if g2[y][x] in dark_idx]
+    if pts:
+        pts.sort(key=lambda p: sum(palette[g2[p[1]][p[0]]]))      # darkest first
+        pts = pts[:6]
+        eyes.append((sum(p[0] for p in pts) // len(pts), sum(p[1] for p in pts) // len(pts)))
+    else:
+        eyes.append((W2 // 4 if not eyes else 3 * W2 // 4, H2 // 5))
+
+# --- write header ---
+with open(out_h, 'w') as f:
+    f.write(f'/* generated by tools/domo_from_image.py from {src.split("/")[-1]} -- do not edit */\n')
+    f.write(f'#define DOMO_W {W2}\n#define DOMO_H {H2}\n')
+    f.write(f'#define DOMO_MOUTH_X {mx}\n#define DOMO_MOUTH_Y {my}\n')
+    f.write(f'#define DOMO_EYE_LX {eyes[0][0]}\n#define DOMO_EYE_LY {eyes[0][1]}\n')
+    f.write(f'#define DOMO_EYE_RX {eyes[1][0]}\n#define DOMO_EYE_RY {eyes[1][1]}\n')
+    f.write(f'#define DOMO_NPAL {len(palette)}\n')
+    f.write('static const unsigned char domo_pal_rgb[DOMO_NPAL][3] = {\n')
+    for c in palette: f.write('    {%d, %d, %d},\n' % c)
+    f.write('};\n')
+    f.write('static const unsigned char domo_pal_mouth[DOMO_NPAL] = {')
+    f.write(', '.join('1' if i in mouth_idx else '0' for i in range(len(palette))))
+    f.write('};\n')
+    f.write('static const unsigned char domo_pix[DOMO_H][DOMO_W] = {\n')
+    for row in g2: f.write('    {' + ','.join(str(v) for v in row) + '},\n')
+    f.write('};\n')
+print(f'sprite {W2}x{H2}, {len(palette)} palette entries, mouth idx {mouth_idx} centre ({mx},{my}), eyes {eyes}')
+
+if preview:
+    sc = 8
+    img = Image.new('RGB', (W2 * sc, H2 * sc), (0x0F, 0x4D, 0x8F))
+    for y in range(H2):
+        for x in range(W2):
+            v = g2[y][x]
+            if v: img.paste(palette[v], (x * sc, y * sc, x * sc + sc, y * sc + sc))
+    for ex, ey in eyes:   # mark detected eyes in the preview
+        img.paste((0, 255, 0), (ex * sc + 2, ey * sc + 2, ex * sc + sc - 2, ey * sc + sc - 2))
+    img.save(preview)

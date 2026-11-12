@@ -1,0 +1,6 @@
+build/
+build-*/
+*.elf
+*.prx
+*.zip
+__pycache__/
