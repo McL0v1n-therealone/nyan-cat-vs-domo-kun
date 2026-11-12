@@ -975,7 +975,7 @@ static const char *credits[] = {
     "#DOMO-KUN",
     "",
     "*IDEA & DIRECTION",
-    "YOU!",
+    "Mcl0v1n",
     "",
     "*PROGRAMMING & PIXEL ART",
     "CLAUDE (AI CODING ASSISTANT)",

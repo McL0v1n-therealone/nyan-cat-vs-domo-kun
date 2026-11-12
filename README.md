@@ -2,6 +2,8 @@
 
 A homebrew shoot-'em-up vidya for the **Sony PSP**. Fly Nyan Cat through space, dodge the Domo-kun horde's spit balls and eye lasers, and blast them with your own laser eyes. 🌈🐱⚡
 
+> ⚠️ **This vidya is 100% vibecoded.** See the [vibecoded disclaimer](#-vibecoded-disclaimer) before you read the code.
+
 ![Title screen](docs/screenshots/title.png)
 
 | Gameplay | Domo eye lasers |
@@ -88,12 +90,23 @@ The generated headers are committed, so building only needs the toolchain. To ch
 
 ## Credits
 
-- **Idea & direction:** [McL0v1n-therealone](https://github.com/McL0v1n-therealone)
+- **Idea & direction:** Mcl0v1n ([McL0v1n-therealone](https://github.com/McL0v1n-therealone))
 - **Programming & pixel art:** Claude (AI coding assistant)
 - **Nyan Cat** character: Chris Torres (2011)
 - **Domo-kun** character: NHK / Tsuneo Goda (1998)
 - **Domo-kun PNG** used in the title art: by nickfamzi
 - **Toolchain:** [PSPDEV / PSPSDK](https://github.com/pspdev) · tested in [PPSSPP](https://www.ppsspp.org/)
+
+## 🤖 Vibecoded disclaimer
+
+This project was **vibecoded**. Mcl0v1n described what they wanted ("make the Domo-kuns shoot lazers too", "a 4 year old can beat this") and an AI coding assistant (Claude) wrote, built and tested everything. That includes the C code, the pixel art, the sprite and logo scripts, and the build and deploy setup. In practice that means:
+
+- **No human reviewed the code line by line.** It works, but it is one big `main.c` that grew feature by feature. Expect magic numbers, copy-pasted logic and not much structure.
+- **Testing was mostly in the PPSSPP emulator**, by scripted key presses and screenshots, plus a few runs on a real PSP. Real hardware showed rendering glitches that the emulator didn't, and the fixes have had little real-hardware testing so far.
+- **Difficulty tuning is based on vibes**, not playtesting. Domo attack timings and speeds were changed whenever someone said it was too easy.
+- **Use it as a fun example, not a reference** for how to write PSP homebrew properly. If you want to learn, read the [PSPDEV docs](https://pspdev.github.io/) too.
+
+Bug reports and PRs are welcome, vibecoded or not.
 
 ## Disclaimer
 
